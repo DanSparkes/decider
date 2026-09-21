@@ -10,12 +10,16 @@ dependencies = ["torch", "transformers>=5", "flash-linear-attention", "numpy<2",
 
 [project.optional-dependencies]
 serve = ["fastapi", "uvicorn[standard]", "httpx"]
+mcp = ["mcp>=1.10.1"]
 train = ["datasets", "accelerate", "scikit-learn", "pillow"]
 games = ["gymnasium", "gym-super-mario-bros", "nes-py", "minigrid", "ale-py", "imageio"]
 
 [project.urls]
 Repository = "https://github.com/Mapika/decider"
 Weights = "https://huggingface.co/Mapika/decider-2b"
+
+[project.scripts]
+decider = "decider.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["decider*"]
