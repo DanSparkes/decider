@@ -333,6 +333,28 @@ uv run decider mcp --model Mapika/decider-2b        # stdio transport
 whose schemas are generated from `decider.systemone.render_question`, the single source of truth for the wire shape.
 Point `mcpServers` at the `uv run decider mcp` command in any MCP client.
 
+#### Traces and replay
+
+Set `DECIDER_TRACE=/var/log/decider/trace.jsonl` (with `DECIDER_TRACE_STATES=1` for a
+`trace.states.jsonl` sidecar that keeps the raw state+questions) to mirror every
+`/decide` and `/v1/systemone` request to a JSONL file — one canonical record per line:
+`ts`, `request_id`, `model`, `layout`, `state_hash`, `question_ids`, `n_opts`,
+`prompt_token_count`, and `output` (`type` + `choice`/`score`/`noul` + `confidence` +
+`probabilities`). Writes are append-only and survive partial crashes.
+
+Diff two weight files against the recorded traffic with:
+
+```bash
+python -m decider.replay --trace trace.jsonl --old Mapika/decider-2b@v8 --new Mapika/decider-2b@v10
+```
+
+which emits per-question KL / JS divergence of the served distributions, the count of
+top-1 flips, and calibration drift (ΔECE). Replaying a trace against itself is zero by
+construction (asserted by `tests/test_trace.py`); `examples/trace_replay.py` shows the
+record → rescore → report loop with synthetic traffic.
+
+> > > > > > > stream/trace
+
 ## Repository layout
 
 ```
@@ -344,6 +366,8 @@ decider/engine.py        shape-bucketed CUDA graphs, torch.compile, shared-prefi
 decider/schema_engine.py schema cache (read-only prefix cache + suffix graphs)
 decider/serve.py         HTTP server: /v1/systemone, /decide, continuous batching per schema and length bucket
 decider/mcp_server.py    Model Context Protocol server: system_one / decide tools over stdio (uv run decider mcp)
+decider/trace.py         JSONL request traces: TraceWriter / TraceReader, hash_state, make_output_records
+decider/replay.py        offline replay + drift report: KL / JS per question, top-1 flips, ΔECE (CLI)
 decider/data/            task registry (~95 public datasets), augment.py (all input-shape augmentations), mixture.py (the mixture
                          and the probes), teacher_*.py (label descriptions, custom questions, situations from a local 27B teacher)
 decider/train.py         cross-entropy fine-tune, token-bucketed batches, random layout per example, abstain augmentation
@@ -355,7 +379,7 @@ decider/vision/          the vision-language variant (decisions from pixels)
 teacher_data/            the teacher-written data the mixture needs (label descriptions, custom questions, routing messages, situations)
 scripts/                 train.sh, evaluate.sh, serve.sh, stage_release.py, upload_hf.py
 moe/                     the frozen-expert Muon training, evaluation and NVFP4 quantization scripts of decider-35b-a3b
-examples/                routing with confidence gates, composite scoring, hierarchical beam over Choice probabilities
+examples/                routing with confidence gates, composite scoring, hierarchical beam over Choice probabilities, trace replay
 tests/                   unit tests for the request/answer layer and the prompt layouts (no GPU; `python -m pytest tests`)
 docs/CHANGELOG.md        what changed in every release, newest first, with the v10 recordings and figures
 docs/HISTORY.md          how the released weights were produced (v1 to v10 and the 35B) and what was measured at each stage

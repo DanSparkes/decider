@@ -17,6 +17,7 @@ games = ["gymnasium", "gym-super-mario-bros", "nes-py", "minigrid", "ale-py", "i
 # which is the current LTS line and matches the version already used by Hugging Face
 # transformers and the rest of the project's indirect deps.
 rubric = ["PyYAML>=6,<7"]
+trace = []   # JSONL traces + replay use only stdlib + the core deps; the group exists so `pip install .[trace]` can pull decider in a slim env
 
 [project.urls]
 Repository = "https://github.com/Mapika/decider"

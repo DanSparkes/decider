@@ -22,11 +22,68 @@ MAX_STATE_TOKENS = int(os.environ.get("DECIDER_MAX_STATE_TOKENS", "32768"))
 MAX_FWD_TOKENS = int(os.environ.get("DECIDER_MAX_FWD_TOKENS", "65536"))     # padded tokens per forward pass
 COMPILE = os.environ.get("DECIDER_COMPILE", "1") == "1"
 FP8 = os.environ.get("DECIDER_FP8", "1") == "1"
+TRACE_PATH = os.environ.get("DECIDER_TRACE", "")                          # JSONL; empty disables mirroring
+TRACE_STATES = os.environ.get("DECIDER_TRACE_STATES", "1") == "1"        # also write a states sidecar so replay can rescore
 app = FastAPI(title="decider")
 MODEL_NAME = "decider"; TEMP = 1.0; TEMP_SCHEMA = 1.0; RELEASE_DATE = "2026-09-17"
 gpu_lock = threading.Lock()            # one GPU job at a time: batched graph replays and shared-prefix requests must not interleave
 SHARED_MIN_TOKENS = int(os.environ.get("DECIDER_SHARED_MIN_TOKENS", "768"))   # independent rows over a state this long share one prefix pass
 eng = None; queue = None; stats = dict(requests=0, batches=0, decisions=0, batch_hist={})
+_trace_writer = None
+_trace_side = None
+
+
+def _trace_setup():
+    """Lazy-initialised JSONL trace writer; mirrors each request so a downstream
+    ``decider.replay`` can rescore it against a newer weight file."""
+    global _trace_writer, _trace_side
+    if not TRACE_PATH or _trace_writer is not None:
+        return
+    from decider.trace import TraceWriter
+    _trace_writer = TraceWriter(TRACE_PATH)
+    if TRACE_STATES:
+        side = _trace_writer.path.with_suffix(".states.jsonl")
+        _trace_side = side.open("a", encoding="utf-8")
+
+
+def _trace_mirror(*, request_id, layout, state_hash, question_ids, n_opts, prompt_token_count, output,
+                  state=None, questions=None):
+    """Append one trace record. Pass ``state`` and ``questions`` to enable later
+    replay against another weight file."""
+    if not TRACE_PATH:
+        return
+    _trace_setup()
+    if _trace_writer is None:
+        return
+    _trace_writer.log(request_id=request_id, model=MODEL_NAME, layout=layout,
+                      state_hash=state_hash, question_ids=question_ids, n_opts=n_opts,
+                      prompt_token_count=prompt_token_count, output=output)
+    if _trace_side is not None and state is not None and questions is not None:
+        import json as _json
+        _trace_side.write(_json.dumps({"request_id": request_id, "state": state,
+                                       "questions": questions}, ensure_ascii=False) + "\n")
+        _trace_side.flush()
+
+
+def _format_trace(formatted):
+    """Convert the ``/decide`` response (one entry per question) into the canonical
+    trace ``output`` shape (``type``, ``choice`` / ``score`` / ``noul``, ``confidence``,
+    ``probabilities``).  The format mirrors ``decider.systemone.format_answer`` so
+    replay can read it back the same way."""
+    out = []
+    for ans in formatted.values():
+        rec = {"type": ans.get("type", "choice"), "probabilities": dict(ans.get("probabilities", {}))}
+        if "choice" in ans:
+            rec["choice"] = ans["choice"]
+        if "score" in ans:
+            rec["score"] = ans["score"]
+        if "noul" in ans:
+            rec["noul"] = ans["noul"]
+        probs = rec["probabilities"]
+        if probs:
+            rec["confidence"] = float(ans.get("confidence", max(probs.values())))
+        out.append(rec)
+    return out
 
 
 class Req(BaseModel):
@@ -157,7 +214,17 @@ async def decide(r: Req):
     await queue.put((fut, qs, it))
     probs = await fut
     stats["requests"] += 1; stats["decisions"] += len(qs)
-    return _format(r.schema_, qs, probs)
+    out = _format(r.schema_, qs, probs)
+    if TRACE_PATH:
+        from decider.trace import hash_state
+        _trace_mirror(request_id=None, layout="state_first",
+                      state_hash=hash_state(r.context),
+                      question_ids=list(r.schema_.keys()),
+                      n_opts=[len(q["options"]) for q in qs],
+                      prompt_token_count=len(it["ids"]),
+                      output=_format_trace(out),
+                      state=r.context, questions=r.schema_)
+    return out
 
 
 SCHEMA_FIRST = False; se = None; squeue = None; schemas = {}            # schema cache (models trained on the questions-first layout, v7+)
@@ -254,8 +321,18 @@ async def systemone(r: S1Req):
         row = await loop.run_in_executor(None, lambda: se.tokenize(h, S1.render_state(r.state), MAX_STATE_TOKENS))      # CPU work stays off the GPU lock
         fut = loop.create_future(); await squeue.put((fut, h, row)); p = await fut
         stats["requests"] += 1; stats["decisions"] += len(rqs); stats["schema_requests"] = stats.get("schema_requests", 0) + 1
-        return {"model": MODEL_NAME, "answers": S1.assemble(rqs, index, [pk.tolist() for pk in p]),
-                "usage": {"input_tokens": len(row[0]) * h.P, "cached_tokens": sum(h.tps), "output_tokens": 0}}
+        out = {"model": MODEL_NAME, "answers": S1.assemble(rqs, index, [pk.tolist() for pk in p]),
+               "usage": {"input_tokens": len(row[0]) * h.P, "cached_tokens": sum(h.tps), "output_tokens": 0}}
+        if TRACE_PATH:
+            from decider.trace import hash_state, make_output_records
+            _trace_mirror(request_id=None, layout="schema_first",
+                          state_hash=hash_state(r.state),
+                          question_ids=list(r.questions.keys()),
+                          n_opts=[len(rq["options"]) for rq in rqs.values()],
+                          prompt_token_count=len(row[0]) * h.P,
+                          output=make_output_records(out["answers"]),
+                          state=r.state, questions=r.questions)
+        return out
     try:
         (rqs, index), items = await loop.run_in_executor(None, _prepare_s1, r.state, r.questions, r.independent)
     except ValueError as e:
@@ -270,8 +347,19 @@ async def systemone(r: S1Req):
         res = await asyncio.gather(*futs)
     probs = [p for ps in res for p in ps]                                   # one prob row per question, request order
     stats["requests"] += 1; stats["decisions"] += len(rqs)
-    return {"model": MODEL_NAME, "answers": S1.assemble(rqs, index, [p.tolist() for p in probs]),
-            "usage": {"input_tokens": S1.unique_tokens(items), "output_tokens": 0}}
+    out = {"model": MODEL_NAME, "answers": S1.assemble(rqs, index, [p.tolist() for p in probs]),
+           "usage": {"input_tokens": S1.unique_tokens(items), "output_tokens": 0}}
+    if TRACE_PATH:
+        from decider.trace import hash_state, make_output_records
+        prompt_tokens = max((len(it["ids"]) for it in items), default=0)
+        _trace_mirror(request_id=None, layout="state_first",
+                      state_hash=hash_state(r.state),
+                      question_ids=list(r.questions.keys()),
+                      n_opts=[len(rq["options"]) for rq in rqs.values()],
+                      prompt_token_count=prompt_tokens,
+                      output=make_output_records(out["answers"]),
+                      state=r.state, questions=r.questions)
+    return out
 
 
 @app.get("/v1/models")
