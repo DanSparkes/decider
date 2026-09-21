@@ -4,8 +4,8 @@
    python -m decider.probes.isolated runs/r12_v7/model [--n 300] [--layout schema_first]"""
 import argparse
 import json
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
