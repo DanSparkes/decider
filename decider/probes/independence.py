@@ -4,10 +4,15 @@
    independent  one row per question (context + that question only): independent by construction
 Reports accuracy for each, and how far the packed answers move when the company changes.
    python -m decider.probes.independence runs/r10_v5/model [--n 300]"""
-import argparse, json, random, numpy as np, torch
+import argparse
+import json
+
+import numpy as np
+import torch
+
+from decider import data as D
 from decider.model import DecisionModel, collate
 from decider.prompt import build
-from decider import data as D
 
 
 class _Keep:
@@ -39,16 +44,16 @@ def main():
         rev = probs(m, [D.Example(e.context, e.qs[::-1], e.task) for e in exs]); rev = [r[::-1] for r in rev]
         ind = probs(m, [D.Example(e.context, [q], e.task) for e in exs for q in e.qs]); ind = [np.stack([ind[i * nq + k][0] for k in range(nq)]) for i in range(len(exs))]
         G = np.array([[q.gold for q in e.qs] for e in exs])
-        acc = lambda P: float(np.mean([[P[i][k].argmax() == G[i, k] for k in range(nq)] for i in range(len(exs))]))
-        d = lambda A, B_: np.array([[np.abs(A[i][k] - B_[i][k]).max() for k in range(nq)] for i in range(len(exs))])
-        flip = lambda A, B_: float(np.mean([[A[i][k].argmax() != B_[i][k].argmax() for k in range(nq)] for i in range(len(exs))]))
-        res[t] = dict(n=len(exs), nq=nq, acc_packed=acc(packed), acc_reversed=acc(rev), acc_independent=acc(ind),
-                      dp_order_mean=float(d(packed, rev).mean()), dp_order_p95=float(np.percentile(d(packed, rev), 95)), flips_order=flip(packed, rev),
-                      dp_pack_vs_ind_mean=float(d(packed, ind).mean()), flips_pack_vs_ind=flip(packed, ind))
+        acc = lambda P, exs=exs, G=G, nq=nq: float(np.mean([[P[i][k].argmax() == G[i, k] for k in range(nq)] for i in range(len(exs))]))
+        d = lambda A, B_, exs=exs, nq=nq: np.array([[np.abs(A[i][k] - B_[i][k]).max() for k in range(nq)] for i in range(len(exs))])
+        flip = lambda A, B_, exs=exs, nq=nq: float(np.mean([[A[i][k].argmax() != B_[i][k].argmax() for k in range(nq)] for i in range(len(exs))]))
+        res[t] = {"n": len(exs), "nq": nq, "acc_packed": acc(packed), "acc_reversed": acc(rev), "acc_independent": acc(ind),
+                      "dp_order_mean": float(d(packed, rev).mean()), "dp_order_p95": float(np.percentile(d(packed, rev), 95)), "flips_order": flip(packed, rev),
+                      "dp_pack_vs_ind_mean": float(d(packed, ind).mean()), "flips_pack_vs_ind": flip(packed, ind)}
         r = res[t]; print(f"[indep] {t:20s} nq={nq} acc packed {r['acc_packed']:.3f} reversed {r['acc_reversed']:.3f} independent {r['acc_independent']:.3f} | "
                           f"reorder: mean max|dp| {r['dp_order_mean']:.3f} p95 {r['dp_order_p95']:.3f} flips {r['flips_order']:.3f} | packed vs independent flips {r['flips_pack_vs_ind']:.3f}", flush=True)
-    if a.out: json.dump(res, open(a.out, "w"), indent=1)
-
-
+    if a.out:
+        with open(a.out, "w") as f:
+            json.dump(res, f, indent=1)
 if __name__ == "__main__":
     main()

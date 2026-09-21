@@ -4,7 +4,9 @@
               catchall: nothing fits, the catch-all is right.
   noul        free-form yes/no questions about properties no training dataset asks about.
    python -m decider.probes.batteries runs/r11_v6/model [more models]"""
-import sys, json
+import json
+import sys
+
 from decider.infer import Decider
 
 DOMAINS = [

@@ -10,16 +10,19 @@ Their generator writes one row per form element: a 3-line context (task / form t
 "bare" is their format verbatim (no question, no descriptions); "short" adds a one-sentence question and "skip (leave this
 element alone)"; "rules" spells out every rule in the question.  Results (v9, 14,254 decisions, forms disjoint from their training
 set): bare 0.41, short 0.67, rules 0.24.  Their 0.7M-parameter specialist: 0.9995 in-distribution; Jev's hosted API, per their card: 0.836."""
-import argparse, collections, json, sys, time
+import argparse
+import collections
+import json
+import time
 
 PROMPTS = {
     "bare": ("What should be done with this element?", {}),
-    "short": ("What should the form-filling agent do with this element? Fill it with the matching document value if it is an empty form field; "
-              "otherwise check, click (submit) or skip.", {"skip": "skip (leave this element alone)"}),
-    "rules": ("The agent fills this form from the document and then submits it. What should it do with the element above? "
+    "short": (("What should the form-filling agent do with this element? Fill it with the matching document value if it is an empty form field; "
+              "otherwise check, click (submit) or skip."), {"skip": "skip (leave this element alone)"}),
+    "rules": (("The agent fills this form from the document and then submits it. What should it do with the element above? "
               "Fill an empty (or stale) form field with the document entity that belongs to it; check a required checkbox that is unchecked; "
               "click the submit button; skip everything else: browser chrome (tabs, address bar, menus), fields that are already filled with the right value, "
-              "checkboxes that are already checked or optional, buttons that do not submit, and fields with no matching document entity.",
+              "checkboxes that are already checked or optional, buttons that do not submit, and fields with no matching document entity."),
               {"check": "check: tick this checkbox (it is required and unchecked)", "click": "click: press this button (it submits the form)",
                "skip": "skip: leave this element alone (chrome, already filled correctly, optional or already checked, not the submit button, no matching entity)"}),
 }
@@ -30,7 +33,8 @@ def main():
     a = ap.parse_args()
     from decider.infer import Decider
     q, desc = PROMPTS[a.prompt]
-    rows = [json.loads(l) for l in open(a.rows)]
+    with open(a.rows, "r") as f:
+            rows = [json.loads(l) for l in f]
     d = Decider(a.model); t = time.time(); preds = []
     for i in range(0, len(rows), a.bs):
         chunk = rows[i:i + a.bs]

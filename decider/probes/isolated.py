@@ -2,12 +2,21 @@
    listwise : the usual prompt, all levels listed with their numbers, one softmax
    isolated : one row per level (state + question + that level only, number stripped) -> P(fits); normalised over levels
    python -m decider.probes.isolated runs/r12_v7/model [--n 300] [--layout schema_first]"""
-import argparse, json, re, random, numpy as np, torch
+import argparse
+import json
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+import numpy as np
+import torch
+
+from decider import data as D
+from decider.metrics import summarize
 from decider.model import DecisionModel, collate
 from decider.prompt import build
-from decider.metrics import summarize
-from decider.systemone import isolated_rows, combine_isolated
-from decider import data as D
+from decider.systemone import combine_isolated, isolated_rows
 
 
 class K:
@@ -38,7 +47,8 @@ def main():
         if len(qs) >= 100: sets[t] = qs[:a.n * 2]
     try:
         _, pr = D.load_cache("data/probes_v7.pkl"); sets["custom_score (teacher, held-out domains)"] = [(e.context, D.Q(e.qs[0].text, e.qs[0].options, e.qs[0].gold)) for e in pr["custom_score"][:a.n * 2]]
-    except Exception: pass
+    except (FileNotFoundError, KeyError) as exc:  # json/data cache absent -> skip held-out probekit
+        logger.debug("probe cache missing: %s", exc)
     res = {}
     for t, qs in sets.items():
         lw = score(m, [D.Example(c, [q], t) for c, q in qs], a.layout)
@@ -47,13 +57,15 @@ def main():
         for c, q in qs:
             n = len(q.options); p, tot = combine_isolated([float(py[k + j][0][1]) for j in range(n)]); k += n; P_iso.append(p); mass.append(tot)
         G = np.array([q.gold for _, q in qs]); NO = np.array([len(q.options) for _, q in qs]); K_ = NO.max()
-        pad = lambda P: np.array([list(p[:n]) + [0.0] * (K_ - n) for p, n in zip(P, NO)])
+        pad = lambda P, NO=NO, K_=K_: np.array([list(p[:n]) + [0.0] * (K_ - n) for p, n in zip(P, NO)])
         A, B_ = summarize(pad([x[0] for x in lw]), G, NO), summarize(pad(P_iso), G, NO)
-        mae = lambda P: float(np.mean([abs(sum(j * pj for j, pj in enumerate(p[:n])) - g) for p, n, g in zip(P, NO, G)]))
-        res[t] = dict(n=len(qs), listwise=dict(acc=A["acc"], nll=A["nll"], ece=A["ece"], mae=mae([x[0] for x in lw])), isolated=dict(acc=B_["acc"], nll=B_["nll"], ece=B_["ece"], mae=mae(P_iso), mean_mass=float(np.mean(mass))))
+        mae = lambda P, NO=NO, G=G: float(np.mean([abs(sum(j * pj for j, pj in enumerate(p[:n])) - g) for p, n, g in zip(P, NO, G)]))
+        res[t] = {"n": len(qs), "listwise": {"acc": A["acc"], "nll": A["nll"], "ece": A["ece"], "mae": mae([x[0] for x in lw])}, "isolated": {"acc": B_["acc"], "nll": B_["nll"], "ece": B_["ece"], "mae": mae(P_iso), "mean_mass": float(np.mean(mass))}}
         r = res[t]; print(f"[iso] {t[:40]:40s} n={len(qs):4d} | listwise acc {r['listwise']['acc']:.3f} nll {r['listwise']['nll']:.3f} ece {r['listwise']['ece']:.3f} mae {r['listwise']['mae']:.3f} | "
                           f"isolated acc {r['isolated']['acc']:.3f} nll {r['isolated']['nll']:.3f} ece {r['isolated']['ece']:.3f} mae {r['isolated']['mae']:.3f} mass {r['isolated']['mean_mass']:.2f}", flush=True)
-    if a.out: json.dump(res, open(a.out, "w"), indent=1)
+    if a.out:
+        with open(a.out, "w") as f:
+            json.dump(res, f, indent=1)
 
 
 if __name__ == "__main__":

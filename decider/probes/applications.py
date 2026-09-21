@@ -3,7 +3,9 @@
   commands  shell command safety: safe / caution / destructive, + does it leave the project directory
   browser   a web page as JSON (task, url, elements): which element to act on next, and which action
    python -m decider.probes.applications runs/r13_v8/model [--layout schema_first]"""
-import json, sys
+import json
+import sys
+
 from decider.infer import Decider
 
 ROUTER_Q = {"tier": {"type": "choice", "instructions": "Which model should answer this prompt?",
