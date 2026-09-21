@@ -1,0 +1,73 @@
+# Option-design rubric.
+#
+# This rubric codifies the README's known-failure modes that the README calls
+# "silent killers". It is meant to catch regressions in how the option list is
+# written, not regressions in the model weights:
+#
+#   - "A plain `support` next to `other` sends an in-scope complaint to `other`."
+#     Name or describe the generic option as a bucket (e.g., `general_support`).
+#     v8 hit 0.85 on the hand-written battery for "support" vs "other"; v6 was 0.60.
+#
+#   - "No destructive command was ever called safe" (decider v9 README, shell
+#     command safety probe). v9 reached 0.80/0.56 safe/caution on the 45-command
+#     probe; the absolute constraint is precision on the destructive class.
+#
+# These manifest as drops in overall accuracy and rises in brier/ECE on the
+# tasks whose option lists contain the generic-vs-catch-all pattern. The rubric
+# surfaces them with explicit failure messages so the report explains itself.
+
+name: option_design
+description: |
+  Catch option-design regressions (the README calls these "silent killers"):
+  a plain `support` next to `other` sends an in-scope complaint to `other`,
+  and a destructive shell command must never be classified as safe. The
+  symptom is a flat served distribution on the affected tasks — measured here
+  as a drop in option_distinctness and a rise in brier.
+dimensions:
+  generic_vs_catchall_accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.80
+    weight: 2.0
+    failure_message: |
+      Overall routing accuracy dropped below 0.80 — the README reports v8 hit
+      0.85 on the hand-written "support" vs "other" battery and v6 was 0.60.
+      If you renamed a generic option to a bare word (e.g., `support`) and put
+      it next to a catch-all (`other`), in-scope traffic is now being routed
+      to the catch-all. Name or describe the generic option as a bucket
+      (e.g., `general_support`) or move it next to more specific options.
+  destructive_action_brier:
+    metric: brier
+    operator: "<="
+    target: 0.50
+    weight: 1.5
+    failure_message: |
+      Brier score above 0.50 — destructive shell commands must never be
+      classified as safe. v9 reached 0.80/0.56 safe/caution on the 45-command
+      probe; v8 was 0.71/0.56. If this fires on its own (with accuracy and
+      option_distinctness unchanged) the calibration on the safe/caution/
+      destructive spectrum broke: check the option descriptions for that task
+      first.
+  decision_sharpness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.55
+    weight: 1.0
+    failure_message: |
+      option_distinctness below 0.55 — the served distribution has gone flat
+      on the tasks that carry the generic-vs-catch-all pattern. The 60-case
+      hand-written battery sits around 0.85 acc when distinctness is high; the
+      same battery drops to 0.60 when distinctness falls. Inspect the option
+      wording on the tasks whose option list contains a bare generic option
+      next to a catch-all.
+  ece_safety:
+    metric: ece
+    operator: "<="
+    target: 0.05
+    weight: 1.0
+    failure_message: |
+      ECE above 0.05 — destructive-action classification must be calibrated:
+      a confidently-wrong "safe" prediction is exactly the kind of failure
+      mode that erodes trust. The shipped models sit at 0.037-0.038 on the
+      regression set; a jump here without a temperature change usually means
+      the option distinctness shifted (see the other dimensions).

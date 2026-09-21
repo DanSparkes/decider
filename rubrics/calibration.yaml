@@ -1,0 +1,52 @@
+# Calibration rubric.
+#
+# The model is trained with a proper scoring rule, and v10's RL stage preserves
+# that property. The held-out NLL on the rebuilt set is 0.622 (v8) / 0.622 (v10);
+# ECE on in-task is 0.037-0.038. If either drifts, the calibration contract broke.
+
+name: calibration
+description: |
+  Calibration is the headline contract: a proper-score decision model. The shipped
+  temperatures put in-task ECE in the 0.03-0.05 range and held-out NLL around
+  0.6-0.7. A drift here is silent — accuracy may not move at all while
+  top-label ECE climbs from 0.04 to 0.12.
+dimensions:
+  ece_in_task:
+    metric: ece
+    operator: "<="
+    target: 0.05
+    weight: 2.0
+    failure_message: |
+      In-task ECE above 0.05. v8/v10 sit at 0.037-0.038 on the rebuilt set; if
+      ECE jumped without a temperature change, the softmax is being read at the
+      wrong temperature or the option distinctness shifted.
+  brier:
+    metric: brier
+    operator: "<="
+    target: 0.50
+    weight: 1.0
+    failure_message: |
+      Brier score above 0.50. The Brier score here is the sum of squared errors
+      across the option list, so it depends on how many options are offered
+      (more options -> higher Brier for the same accuracy). Use this dimension
+      together with `ece_in_task`; a Brier jump with ECE flat usually means the
+      label set got wider, not that calibration got worse.
+  nll:
+    metric: nll
+    operator: "<="
+    target: 1.00
+    weight: 1.0
+    failure_message: |
+      NLL above 1.00. The shipped held-out NLL on the rebuilt set is 0.622
+      (decider-2b v10) / 0.622 (v8). NLL above 1 nat means the served
+      distribution is putting too little mass on the gold answer.
+  aurc:
+    metric: aurc
+    operator: "<="
+    target: 0.20
+    weight: 1.0
+    failure_message: |
+      AURC above 0.20. AURC is the area under the risk-coverage curve; lower is
+      better. The shipped models are around 0.10-0.15 on in-task; a large jump
+      means the confidence of the wrong predictions is similar to the confidence
+      of the right ones.

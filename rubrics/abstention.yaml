@@ -1,0 +1,46 @@
+# Abstention rubric.
+#
+# The model should be confident on in-scope questions (gate_pass_rate at the
+# default 0.8 threshold is high on labeled examples) and should produce a flat
+# distribution only on genuinely off-scope queries (abstain_rate stays low on
+# the labeled regression set; if it climbs, the schema or option wording is
+# forcing the model to hedge).
+
+name: abstention
+description: |
+  Confidence and abstention behavior on the labeled regression set. gate_pass_rate
+  is the fraction of labeled examples whose top-probability option clears 0.8;
+  abstain_rate is the fraction whose top probability is below 0.5 (the model is
+  effectively abstaining on a labeled example).
+dimensions:
+  gate_pass_rate:
+    metric: gate_pass_rate
+    operator: ">="
+    target: 0.70
+    weight: 1.5
+    failure_message: |
+      gate_pass_rate below 0.70 at the default 0.8 confidence threshold. The
+      shipped models clear 0.8 on most labeled examples; a drop means the
+      served distribution is flatter than it should be. The most common cause
+      is an option list that doesn't include the right answer — the model
+      spreads mass instead of committing.
+  abstain_rate_on_labeled:
+    metric: abstain_rate
+    operator: "<="
+    target: 0.15
+    weight: 1.5
+    failure_message: |
+      abstain_rate above 0.15 on the labeled regression set. The shipped models
+      abstain on well under 15% of labeled rows; a higher rate means the model
+      is treating labeled in-scope questions as off-scope. Check the schema
+      and option wording first; this is the symptom of the "support" + "other"
+      option-design regression in disguise.
+  distinctness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.55
+    weight: 1.0
+    failure_message: |
+      option_distinctness below 0.55. Hedging is the upstream cause of both
+      gate_pass_rate drops and abstain_rate climbs; this is the metric to watch
+      when an option-wording change is suspected.

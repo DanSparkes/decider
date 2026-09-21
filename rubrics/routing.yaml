@@ -1,0 +1,44 @@
+# Routing/dispatch rubric.
+#
+# The 94-task set is mostly routing/classification, and the README is explicit that
+# option-design regressions here are silent killers. v8 hit 0.805 in-task and 0.755
+# held-out on the rebuilt set; anything below that suggests something fundamental
+# in the schema or option wording broke.
+
+name: routing
+description: |
+  Routing/dispatch decisions: the model picks one of a fixed label set. Accuracy
+  should stay sharp; calibration should match the held-out aggregate (ECE <= 0.05);
+  the served distribution should be decisive on in-scope messages.
+dimensions:
+  overall_accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.80
+    weight: 2.0
+    failure_message: |
+      Overall routing accuracy dropped below 0.80. v8 hit 0.805 in-task and 0.755
+      held-out on the rebuilt regression set; a regression here usually means an
+      option wording or schema change broke one or more tasks.
+  ece_in_task:
+    metric: ece
+    operator: "<="
+    target: 0.05
+    weight: 1.0
+    failure_message: |
+      ECE above 0.05 on the in-task routing aggregate. The shipped model is
+      temperature-fit so its top-label ECE is in the 0.03-0.05 range; a large jump
+      means the temperature was not fitted, or the softmax is being read at the
+      wrong temperature, or option distinctness changed shape.
+  decision_distinctness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.55
+    weight: 1.0
+    failure_message: |
+      The model is hedging across options more than expected. option_distinctness
+      is the mean of the top probability over all labeled rows (1.0 = every row one-hot,
+      ~0.25 for uniform over 4 options); a value below 0.55 means many predictions are
+      near-uniform across the offered options, which is what happens when an in-scope
+      question is paired with an option list that lacks the right answer (the model
+      splits mass between the closest fit and "other").

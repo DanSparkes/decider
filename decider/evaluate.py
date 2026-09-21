@@ -1,15 +1,23 @@
 """Evaluate a DecisionModel (fine-tuned or raw base) on all eval sets. Saves per-question probs."""
-import argparse, json, os, pickle, random, time
-import numpy as np, torch
-from decider.model import DecisionModel, collate
-from decider.prompt import build
+import argparse
+import json
+import os
+import pickle
+import random
+import time
+
+import numpy as np
+import torch
+
 from decider.metrics import summarize
-from decider import data as D
 
 
 @torch.no_grad()
 def run_eval(model, evals, bs=32, max_ctx=1536, temperature=1.0, log=print, engine=None, max_options=None, max_tokens=24576, layout="state_first"):
     """engine: optional decider.engine.Engine; if given, scoring goes through it instead of the eager path."""
+    from decider import data as D
+    from decider.model import collate
+    from decider.prompt import build
     model.eval()
     dev = next(model.parameters()).device
     results, dump = {}, {}
@@ -60,11 +68,23 @@ def aggregate(results):
     return dict(in_task=agg(tr), heldout=agg(ho), n_in=len(tr), n_heldout=len(ho))
 
 
+def _eval_out_paths(eval_out: str) -> tuple[str, str]:
+    """Return (eval_json_path, preds_pkl_path) given a `--eval-out` argument.
+
+    Accepts either a directory (containing `eval.json` and `preds.pkl`) or a path
+    to an `eval.json` file (with `preds.pkl` in the same directory).
+    """
+    p = os.path.abspath(eval_out)
+    if os.path.isdir(p) or not p.endswith(".json"):
+        return os.path.join(p, "eval.json"), os.path.join(p, "preds.pkl")
+    return p, os.path.join(os.path.dirname(p), "preds.pkl")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen3.5-2B-Base")
     ap.add_argument("--data", default="data/tasks.pkl")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default="", help="directory for eval.json + preds.pkl; required unless --rubric is set")
     ap.add_argument("--bs", type=int, default=32)
     ap.add_argument("--tasks", default="")
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -73,8 +93,30 @@ if __name__ == "__main__":
     ap.add_argument("--max_options", type=int, default=0, help="0 = sub-sample large label sets to 10 (the original protocol); 255 = offer the full label set")
     ap.add_argument("--max_ctx", type=int, default=1536)
     ap.add_argument("--layout", default="state_first", help="state_first | schema_first")
+    ap.add_argument("--rubric", default="", help="path to a rubric YAML/JSON; evaluates --eval-out without re-running the model")
+    ap.add_argument("--eval-out", default="", help="path to an eval.json (or directory containing one); required with --rubric")
     a = ap.parse_args()
+    if a.rubric:
+        if not a.eval_out:
+            ap.error("--rubric requires --eval-out")
+        from decider.rubric import RubricRun, aggregate_rubric
+        from decider.rubric_io import load_rubric
+        eval_json, preds_pkl = _eval_out_paths(a.eval_out)
+        if not os.path.exists(eval_json):
+            ap.error(f"--eval-out: {eval_json} does not exist")
+        if not os.path.exists(preds_pkl):
+            ap.error(f"--eval-out: {preds_pkl} does not exist (rubric needs the per-example dump)")
+        with open(eval_json) as f:
+            payload = json.load(f)
+        run = RubricRun.from_results(payload["results"], preds_pkl)
+        report = aggregate_rubric(load_rubric(a.rubric), run)
+        print(report.render())
+        raise SystemExit(0 if report.passed else 1)
+    if not a.out:
+        ap.error("--out is required (or use --rubric + --eval-out to grade an existing eval)")
     if a.engine == "eager": a.engine = ""
+    from decider import data as D
+    from decider.model import DecisionModel
     _, evals = D.load_cache(a.data)
     if a.tasks:
         evals = {k: v for k, v in evals.items() if k in a.tasks.split(",")}
