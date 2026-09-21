@@ -26,6 +26,39 @@ log = logging.getLogger(__name__)
 DEFAULT_MODEL = "Mapika/decider-2b"
 
 
+_trace_state: dict = {"writer": None, "side": None, "ready": False}
+
+
+def _trace_log(*, model: str, layout: str, state_hash: str, question_ids: list,
+               n_opts: list, prompt_token_count: int, output: list,
+               state=None, questions=None):
+    """Mirror decider/serve.py: one canonical JSONL record per call, plus a
+    .states.jsonl sidecar (DECIDER_TRACE_STATES, default on) so decider.replay
+    can rescore the same prompts against different weights."""
+    st = _trace_state
+    if not st["ready"]:
+        import os
+        path = os.environ.get("DECIDER_TRACE", "")
+        if path:
+            from decider.trace import TraceWriter
+            st["writer"] = TraceWriter(path)
+            if os.environ.get("DECIDER_TRACE_STATES", "1") == "1":
+                st["side"] = st["writer"].path.with_suffix(".states.jsonl")
+        st["ready"] = True
+    w = st["writer"]
+    if w is None:
+        return None
+    rid = w.log(model=model, layout=layout, state_hash=state_hash,
+                question_ids=question_ids, n_opts=n_opts,
+                prompt_token_count=prompt_token_count, output=output)
+    side = st["side"]
+    if side is not None and state is not None and questions is not None:
+        import json
+        side.write(json.dumps({"request_id": rid, "state": state, "questions": questions}, ensure_ascii=False) + "\n")
+        side.flush()
+    return rid
+
+
 def mcp_serve(model: str = DEFAULT_MODEL, *, decider=None, name: str = "decider", **load_kwargs):
     """Build an MCP Server exposing ``system_one`` and ``decide`` as typed tools.
 
@@ -56,7 +89,14 @@ def mcp_serve(model: str = DEFAULT_MODEL, *, decider=None, name: str = "decider"
     )
     def system_one(state: dict | str | list, questions: dict[str, object]) -> dict:
         """Jev/TypeSafe wire-format questions over a state (decider.systemone)."""
-        return _get_decider().system_one(state, questions)
+        out = _get_decider().system_one(state, questions)
+        from decider.trace import hash_state, make_output_records
+        _trace_log(model=model, layout="schema_first", state_hash=hash_state(state),
+                   question_ids=list(questions.keys()),
+                   n_opts=[len(q.get("criteria") or []) for q in questions.values()],
+                   prompt_token_count=0, output=make_output_records(out["answers"]),
+                   state=state, questions=questions)
+        return out
 
     @app.tool(
         description=(
@@ -67,7 +107,21 @@ def mcp_serve(model: str = DEFAULT_MODEL, *, decider=None, name: str = "decider"
     )
     def decide(context: str, questions: list[dict[str, object]]) -> list[dict[str, object]]:
         """Typed decisions in the plain decide format (decider.infer.Decider.decide)."""
-        return _get_decider().decide(context, questions)
+        out = _get_decider().decide(context, questions)
+        from decider.trace import hash_state
+        recs = []
+        for ans in out:
+            rec = {"type": ans.get("type", "choice"),
+                   "probabilities": dict(ans.get("probabilities", ans.get("probs", {})))}
+            for k in ("choice", "score", "noul"):
+                if k in ans:
+                    rec[k] = ans[k]
+            recs.append(rec)
+        _trace_log(model=model, layout="state_first", state_hash=hash_state(context),
+                   question_ids=[str(q.get("question", i)) for i, q in enumerate(questions)],
+                   n_opts=[len(q.get("options") or []) for q in questions],
+                   prompt_token_count=0, output=recs)
+        return out
 
     return app._mcp_server
 
