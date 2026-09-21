@@ -12,6 +12,7 @@ dependencies = ["torch", "transformers>=5", "flash-linear-attention", "numpy<2",
 serve = ["fastapi", "uvicorn[standard]", "httpx"]
 train = ["datasets", "accelerate", "scikit-learn", "pillow"]
 games = ["gymnasium", "gym-super-mario-bros", "nes-py", "minigrid", "ale-py", "imageio"]
+trace = []   # JSONL traces + replay use only stdlib + the core deps; the group exists so `pip install .[trace]` can pull decider in a slim env
 
 [project.urls]
 Repository = "https://github.com/Mapika/decider"
