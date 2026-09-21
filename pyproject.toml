@@ -10,6 +10,7 @@ dependencies = ["torch", "transformers>=5", "flash-linear-attention", "numpy<2",
 
 [project.optional-dependencies]
 serve = ["fastapi", "uvicorn[standard]", "httpx"]
+mcp = ["mcp>=1.10.1"]
 train = ["datasets", "accelerate", "scikit-learn", "pillow"]
 games = ["gymnasium", "gym-super-mario-bros", "nes-py", "minigrid", "ale-py", "imageio"]
 # PyYAML is a runtime dep of decider.rubric_io (loads .yaml/.yml rubrics); pinned to 6.x
@@ -20,6 +21,9 @@ rubric = ["PyYAML>=6,<7"]
 [project.urls]
 Repository = "https://github.com/Mapika/decider"
 Weights = "https://huggingface.co/Mapika/decider-2b"
+
+[project.scripts]
+decider = "decider.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["decider*"]
