@@ -1,0 +1,37 @@
+name: independence
+module: decider.probes.independence
+description: |
+  Listwise-vs-isolated independence: does the answer shift when the same
+  question is asked packed with other questions (one copy of the shared task
+  context) versus entirely on its own? Drift here is the risk profile of
+  *option packing*, not of the model's underlying knowledge.
+dimensions:
+  accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.70
+    weight: 2.0
+    failure_message: |
+      Listwise accuracy dropped below 0.70 on the independence battery. Rows
+      are single-battery questions that stay legible in both listwise and
+      isolated form; a drop here usually means the packing schema (state_first
+      layout) moved a routing decision the isolated read then disagrees on.
+  packing_invariance:
+    metric: dp_order
+    operator: "<="
+    target: 0.12
+    weight: 2.0
+    failure_message: |
+      Answers shift too much when the question batch is reordered (mean
+      |dp| over the per-task density delta). Independence is meant to be
+      order-invariant; a delta above 0.12 means the model is keying off
+      non-answer context like row position inside the prompt.
+  abstain_rate:
+    metric: abstain_rate
+    operator: "<="
+    target: 0.15
+    weight: 1.0
+    failure_message: |
+      Too many rows abstained on the independence battery. The questions are
+      deliberately self-contained; a high abstain rate on isolated rows points
+      at the option list omitting the gold entry, not at genuine uncertainty.

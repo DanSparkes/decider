@@ -1,0 +1,27 @@
+name: batteries
+module: decider.probes.batteries
+description: |
+  Established battery suite: isolated single-question settings that probe the
+  model's object-knowledge shelf (physics, chemistry, geography, trivia)
+  without any state-carrying dialog. Each battery row is self-contained, so
+  accuracy here is the cleanest read on world knowledge independent of the
+  routing/abstention layer.
+dimensions:
+  accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.72
+    weight: 2.0
+    failure_message: |
+      Battery accuracy dropped below 0.72. These are unambiguous factual
+      questions; the drop means world knowledge coverage or the shared
+      option-sampling drift — not packaging, since rows are isolated.
+  option_distinctness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.58
+    weight: 1.0
+    failure_message: |
+      Batteries are single-hop factual rows where the model should be
+      decisive. Mass split below 0.58 points to option lists that lack the
+      gold entry or to temperature fit drifting.

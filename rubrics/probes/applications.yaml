@@ -1,0 +1,27 @@
+name: applications
+module: decider.probes.applications
+description: |
+  Real-world domain applications pulled from the model card's domain battery
+  table: routing/classification-style decisions where the model picks one of a
+  fixed option set. Gate on accuracy staying sharp and output staying decisive.
+
+dimensions:
+  accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.80
+    weight: 2.0
+    failure_message: |
+      Application-domain accuracy dropped below 0.80. Rebuilt held-out
+      applications previously cleared this bar; a drop usually means a schema
+      or option-wording change broke one of the application families.
+  option_distinctness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.55
+    weight: 1.0
+    failure_message: |
+      The model is hedging across options. option_distinctness is the mean top
+      probability over labeled rows; below 0.55 means mass is split near-evenly
+      across offered options, i.e. an in-scope application is paired with an
+      option list missing the right answer.

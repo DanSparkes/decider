@@ -1,0 +1,38 @@
+name: cua_s1_forms
+module: decider.probes.cua_s1_forms
+description: |
+  CUA S1 decision forms: the model fills each widget on a rendered form where
+  every widget is a distinct decision (choose / type / confirm). Options are
+  pulled from the sibling schema (cua_s1_forms family module), so row shape
+  is identical to the S1 production forms the routed agents consume — a
+  faithful harness read on whether the small-fast tier can take over
+  form-filling from the plan-and-verify tier.
+dimensions:
+  gate_pass_rate:
+    metric: gate_pass_rate
+    operator: ">="
+    target: 0.05
+    weight: 2.0
+    failure_message: |
+      gate_pass_rate below 0.05 means the router is sending essentially every
+      form to the big tier. On the S1 form battery the small-fast tier should
+      pass a non-trivial share; if it passes nothing the tier assignment
+      collapsed to always-route-out, which hides form-tier regressions.
+  field_accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.75
+    weight: 2.0
+    failure_message: |
+      Field accuracy below 0.75 on the S1 forms. Widgets are single-purpose
+      (select/type/confirm) so a dip is a wording or schema-layout regression,
+      not option-set ambiguity.
+  calibration:
+    metric: ece
+    operator: "<="
+    target: 0.10
+    weight: 1.0
+    failure_message: |
+      ECE above 0.10 on the S1 form battery. The gate-to-tier decision reads
+      the softmax top-k; drifting confidence here makes the "should this even
+      be an agent run" answer unreliable.

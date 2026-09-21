@@ -1,0 +1,43 @@
+name: isolated
+module: decider.probes.isolated
+description: |
+  Isolated layout probes: every question is its own single-row context, so no
+  neighbouring rows can smuggle the gold option into a packed window.  Where
+  the pack family keeps all questions in one context with a shared option
+  list, this family drives each row alone — yet STILL asks the model a
+  decision that a human could answer without any of the packed scaffolding.
+  Isolation is the probe that the bias/rubric battery alone cannot supply: if
+  per-row accuracy holds when the neighbour crutch is removed, the model
+  genuinely maps options; if it collapses, the earlier passing score was
+  carried by row position / softmax sharing, not by the option text.
+dimensions:
+  accuracy:
+    metric: acc
+    operator: ">="
+    target: 0.70
+    weight: 2.0
+    failure_message: |
+      Isolated accuracy dropped below 0.70.  These rows are single and
+      self-contained: a human judging the row from the question alone must
+      clear the bar, so the model losing it here means the correct choice only
+      surfaced inside the packed list — i.e. the pack was doing the routing,
+      not the row's own options.
+  option_distinctness:
+    metric: option_distinctness
+    operator: ">="
+    target: 0.55
+    weight: 1.0
+    failure_message: |
+      Isolated rows are hedging across the option list.  Same option fixtures
+      as the battery, so a drop here while the battery clears means the model
+      became indecisive the moment its neighbours disappeared — the options
+      themselves are fine, the *decisiveness* is what leaked.
+  calibration:
+    metric: ece
+    operator: "<="
+    target: 0.08
+    weight: 1.0
+    failure_message: |
+      ECE above 0.08 in isolated layout.  A single, un-packed row is the
+      highest-confidence structure the runner can offer; drift here is a raw
+      confidence/softmax effect rather than a context-packing one.

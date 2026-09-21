@@ -4,8 +4,8 @@ A rubric is a named collection of dimensions. Each dimension asserts that a
 single scalar metric over the run satisfies an operator against a target. The
 synthetic metrics (`abstain_rate`, `gate_pass_rate`, `option_distinctness`)
 are computed from the per-example dump produced by `decider.evaluate.run_eval`;
-the standard ones (`acc`, `nll`, `brier`, `ece`, `aurc`, `acc_at_80`) come
-from the aggregated per-task summary.
+the standard ones (`acc`, `nll`, `brier`, `ece`, `aurc`, `acc_at_80`, `dp_order`)
+come from the aggregated per-task summary.
 
 Public surface (re-exported from `decider`):
 - `Rubric`           — the named, weighted set of dimensions
@@ -29,6 +29,7 @@ Metric = Literal[
     "ece",
     "aurc",
     "acc_at_80",
+    "dp_order",
     "abstain_rate",
     "gate_pass_rate",
     "option_distinctness",
@@ -146,6 +147,13 @@ class RubricRun:
         (`abstain_rate`, `gate_pass_rate`, `option_distinctness`) are computed from the dump."""
         if name in {"acc", "nll", "brier", "ece", "aurc", "acc_at_80"}:
             vals = [float(r[name]) for r in self.results.values() if name in r]
+            return float(np.mean(vals)) if vals else 0.0
+        if name == "dp_order":
+            vals = [
+                float(r["dp_order_mean"])
+                for r in self.results.values()
+                if "dp_order_mean" in r
+            ]
             return float(np.mean(vals)) if vals else 0.0
         if name == "abstain_rate":
             return self._abstain_rate()
