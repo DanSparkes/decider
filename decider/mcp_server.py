@@ -43,7 +43,8 @@ def _trace_log(*, model: str, layout: str, state_hash: str, question_ids: list,
             from decider.trace import TraceWriter
             st["writer"] = TraceWriter(path)
             if os.environ.get("DECIDER_TRACE_STATES", "1") == "1":
-                st["side"] = st["writer"].path.with_suffix(".states.jsonl")
+                _side_p = st["writer"].path.with_suffix(".states.jsonl")
+                st["side"] = open(_side_p, "a", encoding="utf-8")  # noqa: SIM115
         st["ready"] = True
     w = st["writer"]
     if w is None:
@@ -51,6 +52,7 @@ def _trace_log(*, model: str, layout: str, state_hash: str, question_ids: list,
     rid = w.log(model=model, layout=layout, state_hash=state_hash,
                 question_ids=question_ids, n_opts=n_opts,
                 prompt_token_count=prompt_token_count, output=output)
+    w.flush()
     side = st["side"]
     if side is not None and state is not None and questions is not None:
         import json
@@ -135,6 +137,12 @@ def main(argv=None) -> int:
     mcp.add_argument("--device", default=None, help="device: cuda or cpu (default: cuda if available)")
     mcp.add_argument("--temperature", type=float, default=None, help="override the fitted temperature")
     mcp.add_argument("--no-graphs", action="store_true", help="disable CUDA graphs (use eager mode)")
+    mcp.add_argument(
+        "--backend",
+        default=None,
+        choices=("mapika", "laya"),
+        help="decision backend: mapika (torch Decider, default) or laya (laya-mlx, Apple silicon)",
+    )
     args = p.parse_args(argv)
     if args.cmd == "mcp":
         import asyncio
@@ -155,7 +163,13 @@ def main(argv=None) -> int:
             kwargs["temperature"] = args.temperature
         if args.no_graphs:
             kwargs["use_graphs"] = False
-        server = mcp_serve(args.model, **kwargs)
+        backend = args.backend or __import__("os").environ.get("DECIDER_BACKEND", "mapika")
+        if backend == "laya":
+            from decider.laya_backend import LayaBackend
+
+            server = mcp_serve(args.model, decider=LayaBackend(), **kwargs)
+        else:
+            server = mcp_serve(args.model, **kwargs)
 
         async def _run_stdio():
             from mcp import stdio_server
