@@ -93,7 +93,7 @@ def mcp_serve(model: str = DEFAULT_MODEL, *, decider=None, name: str = "decider"
         """Jev/TypeSafe wire-format questions over a state (decider.systemone)."""
         out = _get_decider().system_one(state, questions)
         from decider.trace import hash_state, make_output_records
-        _trace_log(model=model, layout="schema_first", state_hash=hash_state(state),
+        _trace_log(model=str(out.get("model", model)), layout="schema_first", state_hash=hash_state(state),
                    question_ids=list(questions.keys()),
                    n_opts=[len(q.get("criteria") or []) for q in questions.values()],
                    prompt_token_count=0, output=make_output_records(out["answers"]),
